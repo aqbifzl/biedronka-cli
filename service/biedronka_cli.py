@@ -346,87 +346,6 @@ def cmd_me(args) -> None:
 
 
 # --------------------------------------------------------------------------
-# Shops (Biedronka store locations - "preferred_store" drives which
-# shakeomat pool an account sees, see cmd_set_store below)
-# --------------------------------------------------------------------------
-
-POLAND_CENTER_LAT = 52.0
-POLAND_CENTER_LON = 19.0
-
-
-def _any_account_name(store: dict, explicit: str) -> str:
-    """Pick one account to authenticate with for account-agnostic endpoints
-    (shop search/lookup isn't tied to a specific account)."""
-    if explicit:
-        if explicit not in store["accounts"]:
-            sys.exit(f"No saved account named '{explicit}'. Run `accounts` to list saved accounts.")
-        return explicit
-    names = list(store["accounts"].keys())
-    if not names:
-        sys.exit("No saved accounts. Run `login --name <name>` first.")
-    return names[0]
-
-
-def cmd_shop_search(args) -> None:
-    store = _load_store()
-    name = _any_account_name(store, args.account)
-    params = {
-        "lat": args.lat,
-        "lon": args.lon,
-        "page": args.page,
-        "search": args.query or "",
-    }
-    resp = _api(name, "GET", "/store/", params=params)
-    resp.raise_for_status()
-    data = resp.json()
-    shops = data.get("stores", [])
-    if not shops:
-        print("No shops found.")
-        return
-    for s in shops:
-        km = s.get("distance")
-        km_str = f"{km / 1000:.1f} km" if isinstance(km, (int, float)) else "?"
-        status = "closed now" if s.get("is_closed_now") else "open now"
-        print(f"[{s['code']}] {s['name']}  ({km_str}, {status})")
-    page = data.get("page_number")
-    pages = data.get("page_count")
-    if pages and pages > 1:
-        print(f"\nPage {page}/{pages} - use --page N to see more.")
-
-
-def cmd_shop_show(args) -> None:
-    store = _load_store()
-    name = _any_account_name(store, args.account)
-    resp = _api(name, "GET", f"/store/{args.code}/")
-    resp.raise_for_status()
-    s = resp.json()
-    print(f"[{s['code']}] {s['name']}")
-    print(f"Address:  {s.get('street')}, {s.get('zip_code')} {s.get('city')}")
-    print(f"Coords:   {s.get('latitude')}, {s.get('longitude')}")
-    print(f"Sunday store: {s.get('is_sunday_store')}   Closed now: {s.get('is_closed_now')}")
-    print(f"Attributes: {', '.join(s.get('attributes', []))}")
-    print("Opening hours:")
-    for day in s.get("opening_hours", []):
-        if day.get("store_is_closed"):
-            print(f"  {day['date']}: closed")
-        else:
-            print(f"  {day['date']}: {day.get('opening_time')} - {day.get('closing_time')}")
-
-
-def cmd_set_store(args) -> None:
-    store = _load_store()
-    if args.account not in store["accounts"]:
-        sys.exit(f"No saved account named '{args.account}'. Run `accounts` to list saved accounts.")
-    resp = _api(args.account, "PATCH", "/users/me/",
-                headers={"content-type": "application/json; charset=utf-8"},
-                data=json.dumps({"preferred_store": args.code}))
-    resp.raise_for_status()
-    me = resp.json()
-    shop = me.get("store") or {}
-    print(f"[{args.account}] preferred_store set to [{shop.get('code')}] {shop.get('name')}")
-
-
-# --------------------------------------------------------------------------
 # Shakeomat
 # --------------------------------------------------------------------------
 
@@ -667,27 +586,6 @@ def main() -> None:
     p = sub.add_parser("me", help="Show account info")
     _add_account_flag(p)
     p.set_defaults(func=cmd_me)
-
-    p = sub.add_parser("set-store", help="Set an account's preferred store (drives its shakeomat pool)")
-    p.add_argument("code", help="Store code, from `shops search`")
-    p.add_argument("--account", required=True, help="Account to set the store on")
-    p.set_defaults(func=cmd_set_store)
-
-    shops = sub.add_parser("shops", help="Look up Biedronka store locations")
-    shops_sub = shops.add_subparsers(dest="shops_command", required=True)
-
-    p = shops_sub.add_parser("search", help="Search/list nearby shops")
-    p.add_argument("--query", default="", help="Text filter (matches name/city/street)")
-    p.add_argument("--lat", type=float, default=POLAND_CENTER_LAT, help="Latitude for distance sorting")
-    p.add_argument("--lon", type=float, default=POLAND_CENTER_LON, help="Longitude for distance sorting")
-    p.add_argument("--page", type=int, default=1)
-    p.add_argument("--account", default=None, help="Account to authenticate with (default: any saved one)")
-    p.set_defaults(func=cmd_shop_search)
-
-    p = shops_sub.add_parser("show", help="Show full details for one shop")
-    p.add_argument("code", help="Store code, from `shops search`")
-    p.add_argument("--account", default=None, help="Account to authenticate with (default: any saved one)")
-    p.set_defaults(func=cmd_shop_show)
 
     shake = sub.add_parser("shake", help="Shakeomat commands")
     shake_sub = shake.add_subparsers(dest="shake_command", required=True)
